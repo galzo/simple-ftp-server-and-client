@@ -1,0 +1,1 @@
+clftp.d: ../clftp.cpp

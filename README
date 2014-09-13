@@ -1,0 +1,113 @@
+FILES:
+clftp.cpp -- represents a client instance
+srftp.cpp -- represents and runs the server's behavior
+performance.jpg -- performance evaluation of our program
+Makefile -- Makefile of the program
+README - This file
+
+REMARKS:
+some explanations about the "protocol" we defined, and what parsing mechanism we gave
+the server as a result.
+the protocol: a client first sends the file's name, then a delimiter (which we defined to be '\n'),
+then the file's size, then another delimiter, and then the data (the file itself).
+why is '\n' a proper delimiter? well, it is a proper delimiter because the file's name and the
+file's size do not contain '\n', of course, and when the data transfer part begins, the server will
+not seek for '\n' anymore, so further '\n'-s will not confuse it.
+how does this work? well, in the client's side, the client counts the characters in the file it
+wants to send, and then sends a request to the server. the server receives the request and
+allocates this connection a socket. the client sends the file to the server in the defined above
+convention (protocol), through the just allocated socket.
+in the server's side,  the server receives the data the client sent, and divides it into 3 using
+the delimiters: the string before the first '\n' is the name the incoming file should be saved
+under in the server, the number between the first '\n' and the second '\n' is the file's size, and
+the data after the second '\n' is the file itself.
+now, let us stop looking at a specific client-server connection, and start looking at the big
+picture. for every client, the server allocates an entry in a map, which maps a file descriptor
+(a file descriptor that the server is using with a specific socket that is used to communicate with
+a specific client) to some buffer, which stores the data that was sent by the client.
+while and after receiving this data through the socket, it is processed by the server, using a
+state machine that tells what part 
+(reading the file's name/reading the file's size/reading the file itself) is processed right now.
+the server has its own socket (which receives new connection requests) and every active 
+client has it's own socket. the server listens to all the sockets (via select function call) - 
+whenever it receives a new connection request, it dedicates it a new socket, 
+and whenever a client's socket sends data, it processes the data.
+upon ending the connection with a client, the server checks if the data size transferred matches
+the file size specified by the client, if not - it deletes the file since it is incomplete. 
+
+ANSWERS:
+- Question: In this EX, you are required to implement a file transfer protocol over TCP 
+connection. The question is how it could be done over UDP connection. You shall 
+develop an efficient and reliable file transfer protocol over UDP connection. You 
+should take into account the problems arise by using UDP, and solve them in your 
+suggested protocol. 
+You are required to describe such protocol, explain it (e.g. how it solves each 
+problem, why it is efficient, etc.), and mention how its implementation will be 
+different from the protocol you are required to implement.
+answer:
+by using UDP, the major problems that arise are: packets duplication, packets loss,
+and packets that arrive to the server out of order.
+the protocol we will now describe is not instead of the above protocol (the protocol we used in the
+above description and in the code itself of course), but  in addition to it. means, the already
+described above conventions, should be met in addition to the conventions we are about to
+describe.
+well, on the client side - the client will send the file in packets (so there wouldn't be any need for
+further division for the file to be transferred) and in the beginning of any packet write the packet's
+number. means, the first packet will start with the number 1 (and then '\n'), the second packet will
+start with the number 2 (and then '\n'), etc.
+on the server's side - the server will allocate some memory for each client - the minimum between the
+file's size (which is known since the client meets the defined above conventions) and a predefined
+maximum space. now, whenever the server is getting a packet it expects to get (starting from the 1st
+and going on), he acts as defined above. whenever he gets a packet he is not expecting - if he already
+got it (means, its number is a number that is smaller than the number of the packet it expects) it
+means it was duplicated, so he ignores it, if it hasn't got it already (means, the number of it is
+bigger than the number it expects, and the packet is not already in memory) - it saves it in the memory
+that is dedicated to this client. when it is done with receiving the current packet and it is expecting
+another one (of course, only if there is another one. the server knows if there is another one, because
+it knows what's the total size of the file, and it knows what's a single packet size is), it first
+checks if it is in the memory that was dedicated for this client - if it is there, the server handles
+it and keeps on with the same behavior regarding the next packet. if it isn't there, the server starts
+expecting the next packet, and so on.
+whenever the server starts to expect a specific packet, it starts a timer. if a predefined amount of
+time has passed and the packet did not arrive - the server will request the client to re-send the
+packet, assuming it was sent and lost.
+why is this protocol good?
+first, it handles the unreliableness of UDP, because it takes care of solving the 3 problems: packets
+duplication, packets loss, and packets that arrive to the server out of order.
+in the protocol's description we neatly explained how it takes care of each of those problems.
+why is this protocol efficient? the protocol uses UDP on the lower layer, which forces a much
+smaller overhead than TCP. in addition, the server gets the data divided into packets from the client,
+so first, they are sent in order and very likely to get to the server in order (which forces less need
+to save packets), and second, no "middleman" has to divide the data into packets.
+for the question why it is different, the answer is obvious - we added more conventions to an already
+existing protocol (that we defined for this exercise) to "cover up" for the transport layer - which
+supplies us more functionalities when it implemented with TCP, and does not supply those when it is
+implemented using UDP.
+- Question: performance evaluation - Please summarize the experiment and analyse the results.
+answer:
+these are the 5 files we transferred in this little experiment, and the times it took to
+transfer them -
+1)  File name: size1.txt
+    file size: 3.3 KB
+    total transfer time on a local computer: 0.000264 seconds
+    total transfer time over the network: 0.002444 seconds
+2)  file name: size2.pdf
+	file size: 914.8 KB
+    total transfer time on a local computer: 0.031607 seconds
+	total transfer time over the network: 0.186663 seconds
+3)  file name: size3.jpg
+	file size: 2500 KB (2.5 MB)
+    total transfer time on a local computer: 0.13221 seconds
+	total transfer time over the network: 0.470949 seconds
+4)  file name: size4.mp3
+	file size: 10500 KB (10.5 MB)
+    total transfer time on a local computer: 0.562193 seconds
+	total transfer time over the network: 1.81221 seconds
+5)  file name: size5.mp4
+	file size: 149000 KB (149 MB)
+    total transfer time on a local computer: 8.04323 seconds
+	total transfer time over the network: 26.171 seconds
+well, the results are not surprising: of course, on the same computer the data is
+transferred very quickly since it does not have to be routed, but over the network the
+data is routed through several machines (at least two - the sender and the server) so
+it takes more time (to go through a longer "path").
